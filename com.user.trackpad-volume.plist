@@ -6,7 +6,7 @@
     <string>com.user.trackpad-volume</string>
     <key>ProgramArguments</key>
     <array>
-        <string>~/Applications/trackpad-volume.app/Contents/MacOS/trackpad-volume</string>
+        <string>/Users/YOU/Applications/trackpad-volume.app/Contents/MacOS/trackpad-volume</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
