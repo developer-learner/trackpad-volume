@@ -1,46 +1,34 @@
 # BACKLOG.md — Task Queue
 
 > Ordered by priority. Top = next up.
-> When starting a task, move it to CURRENT.md and expand it into a full spec.
-
----
-
-## Format
-
-```
-### [Task name]
-**Priority:** [P0 critical / P1 high / P2 medium / P3 low]
-**Why:** [One sentence on the value]
-**Rough size:** [Small / Medium / Large]
-**Depends on:** [Any blockers]
-```
 
 ---
 
 ## Up Next
 
-### [TASK_NAME]
-**Priority:** P1
-**Why:** [Value statement]
-**Rough size:** Medium
-**Depends on:** Nothing
+(None — project is feature-complete for personal use.)
 
 ---
 
 ## Later
 
-### [TASK_NAME]
+### Code signing with stable identity
 **Priority:** P2
-**Why:** [Value statement]
-**Rough size:** Large
-**Depends on:** [Other task]
+**Why:** Rebuilds invalidate Accessibility TCC grant (ad-hoc signing changes identity each time). A self-signed dev cert would fix this.
+**Rough size:** Small
+
+### Remove stale template files
+**Priority:** P3
+**Why:** `BLUEPRINT.md`, `scripts/bootstrap.sh`, `scripts/new-project.sh` are template leftovers not used by this project.
+**Rough size:** Small
 
 ---
 
 ## Icebox (someday/maybe)
 
-- [Vague idea 1]
-- [Vague idea 2]
+- Add an on-screen display (HUD) for volume/brightness feedback
+- Support for tap-hold instead of Fn modifier (e.g., three-finger scroll)
+- Notarized distribution (requires Apple Developer Program + hardened runtime entitlements)
 
 ---
 
@@ -48,4 +36,11 @@
 
 | Task | Completed | Notes |
 |------|-----------|-------|
-| [Task] | [Date] | [Any learnings] |
+| Initial CLI prototype | 2026-06-04 | Basic Fn+scroll volume via CoreAudio |
+| Three-tier volume fallback | 2026-06-04 | Per-channel → main → virtual master → AppleScript |
+| DisplayServices brightness | 2026-06-04 | Via `dlopen` from dyld shared cache |
+| dlsym UB fix | 2026-06-04 | Guard null pointer before `unsafeBitCast` |
+| Settability check | 2026-06-04 | `AudioObjectIsPropertySettable` before write |
+| Menubar app | 2026-06-04 | NSStatusItem, Quit, Launch at Login toggle |
+| Custom icon | 2026-06-04 | Trackpad + chevron, template-aware |
+| Packaging | 2026-06-04 | Info.plist tracked, deploy script, absolute LaunchAgent path |

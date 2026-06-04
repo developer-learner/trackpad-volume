@@ -7,8 +7,11 @@
 
 ## Problem Statement
 
-[What problem does this product solve? Who has this problem?
-One paragraph. Be specific about the pain, not the solution.]
+macOS has no built-in way to adjust volume or brightness using trackpad
+gestures. Apple keyboards with Touch Bar or without function keys make
+dedicated media keys unavailable. Third-party solutions exist but are heavy
+(menu bar apps, preference panes, subscription models). This tool solves
+one thing: Fn+trackpad volume and brightness, nothing else.
 
 ---
 
@@ -16,24 +19,25 @@ One paragraph. Be specific about the pain, not the solution.]
 
 | User type | Description | Primary need |
 |-----------|-------------|--------------|
-| [Type 1] | [Who they are] | [What they need most] |
-| [Type 2] | [Who they are] | [What they need most] |
+| MacBook users | Built-in keyboard lacks function/media keys | Volume control without reaching for Touch Bar or menu bar |
+| External keyboard users | Mechanical/compact keyboards without media keys | Volume + brightness via the trackpad they're already using |
+| Minimalists | Want one utility that does one thing well | No background daemons, no subscriptions, no UI |
 
 ---
 
 ## Core Value Proposition
 
-[One sentence: "We help [user] do [thing] so they can [outcome]."]
+"Hold Fn, scroll on the trackpad — volume changes. Swipe horizontally — brightness changes. No windows, no menus, no configuration."
 
 ---
 
 ## What We Are Not Building
 
-> Explicit non-goals prevent scope creep and misguided LLM suggestions.
-
-- [e.g. "Not a marketplace — no buyer/seller dynamic"]
-- [e.g. "Not a mobile app — web only for now"]
-- [e.g. "Not a real-time collaboration tool — async is fine"]
+- Not a media player controller (no play/pause/skip)
+- Not an on-screen display (no HUD)
+- Not a system preference pane
+- Not a subscription service
+- Not a menu bar app (uses status item only for Quit + Launch at Login)
 
 ---
 
@@ -41,12 +45,6 @@ One paragraph. Be specific about the pain, not the solution.]
 
 | Metric | Target | How measured |
 |--------|--------|--------------|
-| [Metric] | [Value] | [Method] |
-
----
-
-## Feature Flags / Rollout Notes
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| [Feature] | [planned/in-dev/live/deprecated] | [Notes] |
+| Latency | < 50ms from scroll to audible volume change | Subjective / slow-mo recording |
+| Crash rate | 0 crashes per session | Console.app crash reports |
+| Volume range | 0–100% across all devices | Tested on headphones, built-in speakers, external DAC |

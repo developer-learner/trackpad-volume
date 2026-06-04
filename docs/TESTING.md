@@ -1,108 +1,64 @@
 # TESTING.md — Testing Strategy
 
 > Strategy and conventions, not results.
-> CI handles pass/fail tracking. This file tells the LLM how we test.
+> This project has no automated test suite — CoreAudio and DisplayServices
+> are hardware-bound APIs that cannot be unit tested without real devices.
 
 ---
 
 ## Philosophy
 
-- Test behavior, not implementation
-- Tests should read like documentation
-- If it's hard to test, the design is wrong — fix the design
-- Coverage target: 80% on business logic (services/), not on route boilerplate
+- No automated tests — hardware APIs (CoreAudio, DisplayServices) can't be mocked meaningfully
+- Every change is verified by running the tool and testing on real hardware
+- CI is not applicable — no test runner, no coverage
 
 ---
 
-## Test Types
+## Manual Test Checklist
 
-| Type | Location | Tool | When to write |
-|------|----------|------|---------------|
-| Unit | `tests/services/`, `tests/utils/` | pytest | Always — alongside new functions |
-| Integration | `tests/integration/` | pytest | For flows that touch DB or external services |
-| API | `tests/api/` | pytest + httpx | For every route |
+Run the built binary and verify each scenario:
 
----
+### Volume
 
-## Running Tests
+| Scenario | Steps | Expected |
+|----------|-------|----------|
+| Headphones | Plug in headphones, Fn+vertical scroll | Volume changes, left/right channels balance |
+| Built-in speakers | Disconnect headphones, Fn+scroll | Volume changes (virtual master `'vmvc'` path) |
+| External DAC | Connect USB DAC, Fn+scroll | Volume changes (main element path) |
+| Mute edge | Scroll down repeatedly | Volume stays at 0, no overflow |
+| Max edge | Scroll up repeatedly | Volume stays at 1, no overflow |
+| No Fn | Scroll without holding Fn | Normal page scrolling, no volume change |
 
-```bash
-# All tests
-pytest
+### Brightness
 
-# With coverage report
-pytest --cov=src --cov-report=term-missing
+| Scenario | Steps | Expected |
+|----------|-------|----------|
+| Normal | Fn+horizontal swipe | Brightness changes smoothly |
+| Internal display only | On MacBook with no external monitor | Brightness adjusts |
+| External monitor | Connect external display | Brightness adjusts on built-in display (only one CGMainDisplayID) |
+| Min edge | Swipe left repeatedly | Brightness stays at 0 |
+| Max edge | Swipe right repeatedly | Brightness stays at 1 |
 
-# Specific file
-pytest tests/services/test_project_service.py
+### Launch at Login
 
-# Specific test
-pytest tests/services/test_project_service.py::test_create_project_returns_id
+| Scenario | Steps | Expected |
+|----------|-------|----------|
+| SMAppService toggle | Click menu → "Launch at Login" | App appears in System Settings → Login Items |
+| Toggle off | Click again | Removed from Login Items |
+| LaunchAgent | `scripts/deploy.sh` | `launchctl list` shows running instance |
 
-# Verbose
-pytest -v
+### Accessibility
 
-# Stop on first failure
-pytest -x
-```
-
----
-
-## Test Database
-
-```bash
-# Tests use a separate test database
-# Set in .env.test:
-DATABASE_URL=postgresql://localhost/myapp_test
-
-# Fixtures handle setup/teardown — never test against production DB
-```
-
----
-
-## Fixtures
-
-```python
-# conftest.py at tests/ root
-# Standard fixtures available in all tests:
-
-@pytest.fixture
-def db_session():
-    """Rolls back after each test."""
-    ...
-
-@pytest.fixture
-def test_user():
-    """A standard user for auth tests."""
-    ...
-
-@pytest.fixture
-def auth_headers(test_user):
-    """Authorization headers for API tests."""
-    ...
-```
+| Scenario | Steps | Expected |
+|----------|-------|----------|
+| First launch | Open `.app` | System dialog for Accessibility permission |
+| Rebuild | `swift build && deploy` | Re-grant needed (ad-hoc signing changes identity) |
 
 ---
 
 ## What We Don't Test
 
-- FastAPI route boilerplate (the framework is already tested)
-- Database migration scripts (tested by running them)
-- Third-party library internals
-
----
-
-## Known Issues / Flaky Tests
-
-| Test | Issue | Workaround |
-|------|-------|------------|
-| [test name] | [why it's flaky] | [current workaround] |
-
----
-
-## Mocking Policy
-
-- Mock external HTTP calls (use `respx` for httpx)
-- Mock email sending
-- **Do not mock the database** — use a real test DB with transactions
-- **Do not mock your own services** — if you need to mock it, split the dependency
+- CoreAudio framework internals (Apple tests those)
+- DisplayServices internals (private framework, tested by Apple)
+- CGEventTap (system API, tested by Apple)
+- NSStatusItem / NSMenu rendering (AppKit, tested by Apple)
