@@ -1,22 +1,29 @@
 # trackpad-volume
 
-macOS menu-bar-less volume & brightness control via trackpad gestures.
+macOS menu-bar volume & brightness control via trackpad gestures.
 Fn+vertical scroll → volume. Fn+horizontal swipe → brightness.
 
-## Usage
+## For end users (download)
+
+1. Download `trackpad-volume.app` (ask the developer for the zip)
+2. Drag to `~/Applications`
+3. **Right-click → Open** the first time (ad-hoc signed, Gatekeeper bypass)
+4. Grant **Accessibility** permission when prompted
+5. Use the menubar icon to toggle **Launch at Login**
+
+## For developers (build from source)
 
 ```bash
-swift build -c release
-./.build/release/trackpad-volume
+git clone https://github.com/developer-learner/trackpad-volume.git
+cd trackpad-volume
+scripts/deploy.sh
 ```
 
-Requires **Accessibility** permission (System Settings → Privacy → Accessibility).
-Tapping ^C to quit.
+The script builds, creates `~/Applications/trackpad-volume.app`, and installs a LaunchAgent. Then grant Accessibility as above.
 
 ## How it works
 
-A single-file Swift CLI that installs a CGEventTap intercepting scroll-wheel
-events when the Fn (🌐) key is held:
+A Swift menubar app with a CGEventTap intercepting scroll-wheel events when Fn (🌐) is held:
 
 | Gesture | Action |
 |---------|--------|
@@ -30,26 +37,10 @@ virtual master `'vmvc'`) with NSAppleScript on a background thread as last resor
 **Brightness:** `DisplayServicesGetBrightness`/`SetBrightness` loaded at runtime
 via `dlopen` from the dyld shared cache. Works on Apple Silicon (macOS 26+).
 
-## Build
+## Requirements
 
-Requires Swift 5.9+ and macOS 13+. Pure SPM, no Xcode project:
-
-```bash
-swift build -c release
-```
-
-Binary at `.build/release/trackpad-volume`.
-
-## Deploy as LaunchAgent
-
-```bash
-cp .build/release/trackpad-volume ~/Applications/
-# create ~/Library/LaunchAgents/com.user.trackpad-volume.plist
-launchctl load ~/Library/LaunchAgents/com.user.trackpad-volume.plist
-```
+macOS 13+, Swift 5.9+ (to build). No Xcode needed.
 
 ## Architecture
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system design:
-three-tier volume fallback, event flow diagram, brightness loading approach,
-device management, and known constraints.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
