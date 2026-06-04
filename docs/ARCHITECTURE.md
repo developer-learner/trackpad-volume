@@ -7,7 +7,7 @@
 
 ## System Overview
 
-Single-file Swift CLI (`main.swift`) that installs a CGEventTap to intercept scroll-wheel events. Fn+scroll controls volume via CoreAudio (three-tier fallback) or NSAppleScript fallback; Fn+⌥+scroll controls display brightness via DisplayServices (dlopen'd from dyld shared cache). No GUI, no daemon, no background services — runs as a terminal process or LaunchAgent.
+Single-file Swift CLI (`main.swift`) that installs a CGEventTap to intercept scroll-wheel events. Fn+vertical scroll controls volume via CoreAudio (three-tier fallback) or NSAppleScript fallback; Fn+horizontal scroll controls display brightness via DisplayServices (dlopen'd from dyld shared cache). No GUI, no daemon, no background services — runs as a terminal process or LaunchAgent.
 
 ---
 
@@ -17,7 +17,7 @@ Single-file Swift CLI (`main.swift`) that installs a CGEventTap to intercept scr
 
 1. CGEventTap receives scroll-wheel event
 2. Callback checks `flags` for Fn (`.maskSecondaryFn`) — if absent, passes event through unchanged
-3. If `flags` also contains `.maskAlternate` (⌥) → **brightness** mode, else **volume** mode
+3. Horizontal vs vertical: `abs(axis2)` vs `abs(axis1)` — whichever dominates routes to its mode (brightness or volume respectively)
 4. Each mode has its own scroll accumulator (`scrollAccumVolume`, `scrollAccumBrightness`)
 5. Mode-specific delta added to its accumulator; `Int(accumulator / pxPerStepVolume)` clamped to [-1, 1] for volume, `Int(accumulator / pxPerStepBrightness)` clamped to [-5, 5] for brightness
 6. Mode-specific function called (`changeVolume` / `changeBrightness`) with signed step count
@@ -86,7 +86,7 @@ On macOS 26+ (Tahoe), `DisplayServices.framework` binary is **missing from disk*
 
 ### Target Display
 
-Controls the main display (`CGMainDisplayID()`, always returns 1 on single-display MacBooks). Does not enumerate or select external displays. Each scroll event: `deltaSteps * 0.02` (2% per step), ±5 steps max = ±10% per event. `pxPerStepBrightness = 11.0` (~9% faster scroll-to-step ratio than original 12.0).
+Controls the main display (`CGMainDisplayID()`, always returns 1 on single-display MacBooks). Does not enumerate or select external displays. Each scroll event: `deltaSteps * 0.02` (2% per step), ±5 steps max = ±10% per event. `pxPerStepBrightness = 11.0` (~9% faster scroll-to-step ratio than original 12.0). Activated by Fn+horizontal two-finger swipe (axis2 dominates axis1).
 
 ---
 
@@ -208,4 +208,4 @@ return nil (event consumed)
 - **Threading:** NSAppleScript fallback runs on a global background queue (`DispatchQueue.global().async`). This is critical — if NSAppleScript ran on the event-tap thread, it could trigger a tap timeout under fast scrolling.
 - **Accessibility permission:** Verified on macOS 14.x. The input-monitoring boundary is the surface Apple moves most — re-check on every major OS bump.
 - **Brightness uses DisplayServices via dyld shared cache.** Framework binary may be missing on macOS 26+ (Tahoe) but `dlopen` succeeds. Silently no-ops if `dlopen` or `dlsym` fails (e.g., future macOS version removes the symbols from shared cache).
-- **Fn+⌥ conflicts:** Option (⌥) + scroll is also used by some macOS shortcuts. In practice, the Fn requirement disambiguates, but worth verifying on each OS bump.
+- **Modal conflicts:** Fn+horizontal two-finger swipe has no system-wide binding on macOS. Unlike Fn+⌥ (which could conflict with some apps), the axis-based routing is conflict-free. Diagonal scrolls are dominated by whichever axis has larger magnitude.

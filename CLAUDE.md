@@ -9,7 +9,7 @@
 ## Project Overview
 
 **Name:** trackpad-volume
-**What it does:** macOS menu-bar-less volume & brightness control via Fn/trackpad gestures. Fn+scroll → volume (CoreAudio three-tier fallback), Fn+⌥+scroll → brightness (DisplayServices via dyld shared cache). Built as a Swift CLI with CGEventTap.
+**What it does:** macOS menu-bar-less volume & brightness control via Fn/trackpad gestures. Fn+vertical scroll → volume (CoreAudio three-tier fallback), Fn+horizontal scroll → brightness (DisplayServices via dyld shared cache). Built as a Swift CLI with CGEventTap.
 **Status:** In Development
 
 ---
@@ -51,9 +51,9 @@ trackpad-volume/
   2. Main element scalar — monophonic devices
   3. Virtual master volume (`'vmvc'`) — MacBook speakers, slightly more latency under fast scroll
   4. NSAppleScript fallback — in-process, no subprocess
-- **Brightness** via `DisplayServicesGetBrightness`/`SetBrightness` loaded with `dlopen` from dyld shared cache (Fn+⌥+scroll). No IOKit framework needed. On macOS 26+ (Tahoe) the framework binary is missing from disk but symbols are in the shared cache — `dlopen` succeeds, `dlsym(RTLD_DEFAULT)` would fail.
+- **Brightness** via `DisplayServicesGetBrightness`/`SetBrightness` loaded with `dlopen` from dyld shared cache (Fn+horizontal swipe). No IOKit framework needed. On macOS 26+ (Tahoe) the framework binary is missing from disk but symbols are in the shared cache — `dlopen` succeeds, `dlsym(RTLD_DEFAULT)` would fail.
 - Separate scroll accumulators per mode (`scrollAccumVolume`, `scrollAccumBrightness`)
-- `let volDelta = deltaSteps * 15` — multiplier for osascript fallback (line 61)
+- `let volDelta = deltaSteps * 16` — multiplier for osascript fallback (line 54)
 - Build with `swift build -c release`, binary at `.build/release/trackpad-volume`
 - Deploy as LaunchAgent: copy to ~/Applications/ + launchctl load
 
@@ -93,7 +93,7 @@ trackpad-volume/
 
 **Remaining notes:**
 - Virtual master volume path has slightly more latency on fast flicks vs. headphone scalar path — known, acceptable
-- Delta multiplier for osascript fallback is 15 (tuned for MacBook speakers)
+- Delta multiplier for osascript fallback is 16 (16% per step on osascript 0–100 scale)
 - Brightness silently no-ops if `dlopen` or `dlsym` fails (e.g., pre-Tahoe macOS without DisplayServices framework, or if the API changes in a future release)
 
 ---
@@ -120,6 +120,9 @@ trackpad-volume/
 | 2026-06-04 | Tried `kAudioHardwareServiceDeviceProperty_VirtualMasterVolume` symbol directly — not available in Swift scope | Define the FourCharCode manually: `private let kVirtualMasterVolume: AudioObjectPropertySelector = 0x766D7663` ('vmvc'). |
 | 2026-06-04 | Virtual master volume read/write works but has slightly more latency than per-channel scalar under fast scroll | This is expected — virtual master goes through system audio processing. Not a bug. Documented in ARCHITECTURE.md. |
 | 2026-06-04 | `AGENTS.md` had stale Current Focus still referencing the original `deltaSteps * 12 → 25` change | Keep `Current Focus` in sync with actual project state. Point to docs/ for detailed architecture. |
-| 2026-06-04 | Brightness was not implemented | Added IOKit-based brightness via `AppleLMUController`. Fn+⌥+scroll. Single IOKit path, no fallback. Separate scroll accumulators per mode. Added `IOKit` to Package.swift linker settings. |
+| 2026-06-04 | Brightness was not implemented | Added DisplayServices-based brightness via `dlopen` from dyld shared cache. Fn+⌥+scroll. `DisplayServicesGetBrightness`/`SetBrightness` on `CGMainDisplayID()`. No IOKit — `AppleLMUController` doesn't exist on Apple Silicon. |
 | 2026-06-04 | Used `.maskAlternate` for brightness modifier — must verify no macOS Fn+⌥+scroll conflicts | Option+scroll is used by some system shortcuts, but the Fn requirement disambiguates. Documented in Known Constraints. |
 | 2026-06-04 | Used `dlsym(RTLD_DEFAULT, ...)` for DisplayServices symbols — failed on macOS 26 (Tahoe) where framework binary is missing from disk, even though symbols are in dyld shared cache | Use `dlopen("...DisplayServices", RTLD_LAZY)` first, then `dlsym(handle, ...)`. `RTLD_DEFAULT` only searches already-loaded libraries. On Tahoe the framework must be loaded from shared cache. |
+| 2026-06-04 | Claimed CoreAudio writes return `noErr` but don't change system volume on Tahoe — WRONG. Verified: CoreAudio `'vmvc'` and element-main writes DO change system volume (osascript readback confirms). Moved NSAppleScript off event-tap thread to fix tap-timeout risk. | CoreAudio scalar writes work on Tahoe. Do not assume breakage without testing write + osascript readback. Always move fallback work off the event-tap thread with `DispatchQueue.global().async` to prevent tap timeout. |
+| 2026-06-04 | Changed volume step size from 2% to 16% per step, pxPerStep from 12 to 48 for volume, pxPerStep 11 for brightness (~9% faster), volume step cap from ±5 to ±1, brightness step cap stays ±5 | These are all user-requested tuning values. Document in ARCHITECTURE.md config table. Keep correction log entries for future tuning but don't revert without user request. |
+| 2026-06-04 | Switched from CoreAudio to pure NSAppleScript and back twice during debugging | Verified: CoreAudio is correct primary path. NSAppleScript is async fallback. Pure NSAppleScript gave no benefit (same quantization) and lost device listener and float precision. |
