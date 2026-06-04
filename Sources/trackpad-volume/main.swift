@@ -20,7 +20,7 @@ private let kVirtualMasterVolume: AudioObjectPropertySelector = 0x766D7663 // 'v
 
 private func changeVolume(deltaSteps: Int) {
     guard deltaSteps != 0 else { return }
-    let delta = Float32(deltaSteps) * 0.16
+    let delta = Float32(deltaSteps) * 0.2
     let deviceID = cachedDeviceID
     guard deviceID != 0 else { return }
 
@@ -50,7 +50,7 @@ private func changeVolume(deltaSteps: Int) {
         )
     }
     if status != noErr {
-        let volDelta = deltaSteps * 16
+        let volDelta = deltaSteps * 20
         DispatchQueue.global().async {
             let script = "set volume output volume ((output volume of (get volume settings)) + \(volDelta))"
             if let ascr = NSAppleScript(source: script) {
@@ -146,7 +146,7 @@ private let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
 
         // Require 2x dominance — diagonal scrolls are ambiguous and do nothing
         if absX > absY * 2 {
-            scrollAccumBrightness += deltaX
+            scrollAccumBrightness -= deltaX
             let steps = max(-5, min(5, Int(scrollAccumBrightness / pxPerStepBrightness)))
             if steps != 0 {
                 changeBrightness(deltaSteps: steps)
