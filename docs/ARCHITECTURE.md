@@ -7,7 +7,7 @@
 
 ## System Overview
 
-Single-file Swift CLI (`main.swift`) that installs a CGEventTap to intercept scroll-wheel events. Fn+scroll controls volume via CoreAudio (instant) or NSAppleScript fallback; Fn+⌥+scroll controls display brightness via IOKit (`AppleLMUController`). No GUI, no daemon, no background services — runs as a terminal process or LaunchAgent.
+Single-file Swift CLI (`main.swift`) that installs a CGEventTap to intercept scroll-wheel events. Fn+scroll controls volume via CoreAudio (three-tier fallback) or NSAppleScript fallback; Fn+⌥+scroll controls display brightness via DisplayServices (dlopen'd from dyld shared cache). No GUI, no daemon, no background services — runs as a terminal process or LaunchAgent.
 
 ---
 
@@ -19,14 +19,14 @@ Single-file Swift CLI (`main.swift`) that installs a CGEventTap to intercept scr
 2. Callback checks `flags` for Fn (`.maskSecondaryFn`) — if absent, passes event through unchanged
 3. If `flags` also contains `.maskAlternate` (⌥) → **brightness** mode, else **volume** mode
 4. Each mode has its own scroll accumulator (`scrollAccumVolume`, `scrollAccumBrightness`)
-5. Mode-specific delta added to its accumulator; `Int(accumulator / pxPerStep)` clamped to [-5, 5] → 0–5 steps
+5. Mode-specific delta added to its accumulator; `Int(accumulator / pxPerStepVolume)` clamped to [-1, 1] for volume, `Int(accumulator / pxPerStepBrightness)` clamped to [-5, 5] for brightness
 6. Mode-specific function called (`changeVolume` / `changeBrightness`) with signed step count
 7. Accumulator decremented by `steps * pxPerStep` (keeps each bounded)
 8. Event consumed (return nil) → scroll is suppressed, page does not move
 
 ### Volume Change — Three-Tier Fallback
 
-All tiers use `changeVolume(deltaSteps:)`, same `delta = Float32(deltaSteps) * 0.02` (+/- 2% per step, +/- 10% max per event).
+All tiers use `changeVolume(deltaSteps:)`, same `delta = Float32(deltaSteps) * 0.16` (+/- 16% per step, ±1 step max per event due to cap). Multiplier is `deltaSteps * 16` for NSAppleScript fallback (0–100 osascript scale).
 
 **Tier 1 — Per-Channel Scalar (headphones, instant)**
 ```
@@ -55,34 +55,38 @@ If tier 1 + 2 fail (aggregate devices, built-in speakers). Reads/writes the syst
 
 > **Why `'vmvc'` is manually defined:** This selector was historically `kAudioHardwareServiceDeviceProperty_VirtualMasterVolume` in Apple's headers, deprecated in 10.12 and **removed entirely from modern SDKs**. The `AudioHardwareService` wrapper API was also removed. We define the FourCharCode constant manually (`private let kVirtualMasterVolume: AudioObjectPropertySelector = 0x766D7663`) because the selector itself still resolves through `AudioObjectSetPropertyData` — the FourCharCode is the stable contract, the header symbol name is cosmetic. Do not delete or chase the missing SDK symbol.
 
-**Fallback — NSAppleScript (degraded-only)**
+**Fallback — NSAppleScript**
 ```applescript
-set volume output volume ((output volume of (get volume settings)) + deltaSteps * 15)
+set volume output volume ((output volume of (get volume settings)) + deltaSteps * 16)
 ```
-If all CoreAudio paths fail. Runs on global async queue via NSAppleScript (in-process, no subprocess). Used by <1% of calls in practice.
-
-> ⚠️ **Degraded mode.** `set volume` operates on integer 0–100 scale, so the `0.02` fractional-accumulation feel collapses to 1% granularity. If any device lands here regularly, **investigate why tiers 1–3 failed** — do not accept this as steady state. This is a last-resort don't-be-dead path.
+If all CoreAudio paths fail. Runs on global async queue via `DispatchQueue.global().async` to avoid blocking the event-tap thread (which would trigger a tap timeout). Uses NSAppleScript (in-process, no subprocess). Note: on macOS 26 (Tahoe), CoreAudio scalar writes DO change the system volume (verified), so the fallback is only hit on unusual hardware configurations.
 
 ---
 
 ## Brightness Control
 
-Display brightness is controlled through IOKit's `AppleLMUController` service. Unlike the volume path (which has a three-tier fallback), brightness has a single direct path.
+Display brightness is controlled through `DisplayServicesGetBrightness`/`DisplayServicesSetBrightness` loaded at runtime via `dlopen` from the dyld shared cache. Uses the same `Float` scaling (0.0–1.0) as volume, with `delta = Float(deltaSteps) * 0.02`.
 
-### IOKit AppleLMUController API
+### Loading Approach
 
+```swift
+guard let handle = dlopen(
+    "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
+    RTLD_LAZY
+) else { return (nil, nil) }
+let get = dlsym(handle, "DisplayServicesGetBrightness")
+let set = dlsym(handle, "DisplayServicesSetBrightness")
 ```
-Methods (scalar):
-  0  getBrightnessRange  → outputs [min, max]
-  1  getBrightness       → output current value
-  2  setBrightness       → input new value
-```
 
-The range is hardware-dependent (typically 0–1000 or 0–65535). `changeBrightness` reads range + current, applies `delta = deltaSteps * 0.02` (same scaling as volume), clamps to [0, 1], converts back to hardware units, and writes.
+On macOS 26+ (Tahoe), `DisplayServices.framework` binary is **missing from disk** — the symlink `Versions/Current/DisplayServices` points to a non-existent binary. However, the symbols are available through the dyld shared cache, and `dlopen` succeeds. `RTLD_DEFAULT` (used by `dlsym` without `dlopen`) would fail because the framework isn't pre-loaded.
 
-### No Fallback
+### Why not IOKit
 
-If `AppleLMUController` is unavailable (e.g., external display, desktop Mac), the brightness call silently returns without change. No osascript fallback exists — brightness has no scriptable Apple Events equivalent.
+`AppleLMUController` service does not exist on Apple Silicon Macs. `IODisplayConnect` also absent. `AppleARMBacklight` in IORegistry has no user-client for programmatic writes — IORegistry writes are ignored. The `brightness` CLI (nriley) returns `kIOReturnUnsupported` on this hardware.
+
+### Target Display
+
+Controls the main display (`CGMainDisplayID()`, always returns 1 on single-display MacBooks). Does not enumerate or select external displays. Each scroll event: `deltaSteps * 0.02` (2% per step), ±5 steps max = ±10% per event. `pxPerStepBrightness = 11.0` (~9% faster scroll-to-step ratio than original 12.0).
 
 ---
 
@@ -129,11 +133,12 @@ On `.tapDisabledByTimeout` or `.tapDisabledByUserInput`, the callback re-enables
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `pxPerStep` | 12.0 | Scroll pixels per step — higher = less sensitive |
-| `gateVolume` | `.maskSecondaryFn` | Modifier for volume scroll (Fn / 🌐) |
-| `gateBrightness` | `.maskSecondaryFn` + `.maskAlternate` | Modifier for brightness scroll (Fn+⌥) |
+| `pxPerStepVolume` | 48.0 | Scroll pixels per volume step — higher = less sensitive |
+| `pxPerStepBrightness` | 11.0 | Scroll pixels per brightness step — slightly faster than original 12.0 |
 | `kVirtualMasterVolume` | `0x766D7663` ('vmvc') | FourCharCode for virtual master volume property |
-| `deltaMultiplier` | 15 | Multiplier for osascript fallback step size |
+| `volumeStepScale` | 0.16 | Float delta per volume step (≈16% of full scale) |
+| `brightnessStepScale` | 0.02 | Float delta per brightness step (2% of full scale) |
+| `deltaMultiplier` | 16 | Multiplier for osascript fallback step size (0–100 scale) |
 
 ---
 
@@ -168,7 +173,7 @@ eventCallback()
 scrollAccum += delta
   │
   ▼
-steps = Int(scrollAccum / pxPerStep), clamped [-5, 5]
+steps = Int(scrollAccum / pxPerStepVolume), clamped [-1, 1] for volume; [-5, 5] for brightness
   │
   ├─ steps == 0? ── Yes ──► wait for next event
   │
@@ -183,7 +188,7 @@ changeVolume(deltaSteps: steps)
   └─ Fallback (NSAppleScript) ──► async exec ──► return
   │
   ▼
-scrollAccum -= steps * pxPerStep
+scrollAccum -= steps * pxPerStep{Volume,Brightness}
   │
   ▼
 print log line
@@ -200,7 +205,7 @@ return nil (event consumed)
 - **Fn modifier is hardcoded** to `.maskSecondaryFn`. Cannot be remapped at runtime without recompiling.
 - **Virtual master volume** (`'vmvc'`) was deprecated in macOS 10.12 but continues to work on modern macOS (tested on 14.x+).
 - **No input monitoring permission needed** — `.cgSessionEventTap` uses Accessibility API only.
-- **Threading:** NSAppleScript fallback runs on a global background queue. Not an issue because it's reached only when CoreAudio paths fail.
+- **Threading:** NSAppleScript fallback runs on a global background queue (`DispatchQueue.global().async`). This is critical — if NSAppleScript ran on the event-tap thread, it could trigger a tap timeout under fast scrolling.
 - **Accessibility permission:** Verified on macOS 14.x. The input-monitoring boundary is the surface Apple moves most — re-check on every major OS bump.
-- **Brightness requires `AppleLMUController`.** Only available on Mac laptops with built-in backlight. Desktop Macs and external displays silently no-op.
+- **Brightness uses DisplayServices via dyld shared cache.** Framework binary may be missing on macOS 26+ (Tahoe) but `dlopen` succeeds. Silently no-ops if `dlopen` or `dlsym` fails (e.g., future macOS version removes the symbols from shared cache).
 - **Fn+⌥ conflicts:** Option (⌥) + scroll is also used by some macOS shortcuts. In practice, the Fn requirement disambiguates, but worth verifying on each OS bump.
