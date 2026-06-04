@@ -102,8 +102,8 @@ trackpad-volume/
 
 | Role | Name |
 |------|------|
-| Product owner | [NAME] |
-| Lead dev | [NAME] |
+| Product owner | (personal project) |
+| Lead dev | (personal project) |
 
 ---
 
