@@ -71,6 +71,7 @@ Read these files from the repository in this exact order:
 | 8 | `docs/TESTING.md` | How we test | Writing or running tests |
 | 9 | `tasks/CURRENT.md` | Active task spec | Every coding session |
 | 10 | `tasks/BACKLOG.md` | Upcoming work queue | Planning sessions |
+| 11 | `docs/WISDOM.md` | Meta-lessons from past sessions | Before first coding session — read once |
 
 ---
 
