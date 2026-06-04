@@ -19,6 +19,11 @@ htmlcov/
 .aider*
 !.aider.conf.yml
 
+# Swift / SPM
+.build/
+DerivedData/
+*.swiftmodule
+
 # OS
 .DS_Store
 blueprint-dryrun*/

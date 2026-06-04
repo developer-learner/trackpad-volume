@@ -8,25 +8,19 @@
 
 ## Project Overview
 
-**Name:** [PROJECT_NAME]
-**What it does:** [One paragraph. What does this do, who is it for, what problem does it solve.]
-**Status:** [Planning | In Development | Production]
+**Name:** trackpad-volume
+**What it does:** macOS menu-bar-less volume & brightness control via Fn/trackpad gestures. Fn+scroll → volume (CoreAudio three-tier fallback), Fn+⌥+scroll → brightness (DisplayServices via dyld shared cache). Built as a Swift CLI with CGEventTap.
+**Status:** In Development
 
 ---
 
 ## Tech Stack
 
-> Default template stack shown below. ADAPT to this project's real stack
-> before first commit (see BLUEPRINT.md Rule 3).
-
 ```
-Language:     Python 3.12+
-Framework:    [e.g. FastAPI / Django / Flask]
-Database:     [e.g. PostgreSQL / SQLite / MongoDB]
-Auth:         [e.g. Clerk / JWT / OAuth]
-Hosting:      [e.g. Railway / Fly.io / AWS]
-CI/CD:        GitHub Actions
-Testing:      pytest
+Language:     Swift 5.9+
+Framework:    CoreAudio, ApplicationServices (CGEventTap), DisplayServices (brightness, dlopen'd from dyld shared cache)
+Build:        Swift Package Manager
+Deploy:       LaunchAgent (launchctl)
 ```
 
 ---
@@ -34,32 +28,34 @@ Testing:      pytest
 ## Project Structure
 
 ```
-[PROJECT_NAME]/
-├── src/                  # application source
-│   ├── api/              # route handlers
-│   ├── models/           # data models
-│   ├── services/         # business logic
-│   └── utils/            # shared utilities
-├── tests/                # mirrors src/ structure
-├── docs/                 # architecture, decisions, product
-├── tasks/                # current work + backlog
-├── scripts/              # dev utilities
-├── CLAUDE.md             # this file
-└── CONVENTIONS.md        # code style rules
+trackpad-volume/
+├── Sources/trackpad-volume/main.swift   # single-file app
+├── docs/                                # architecture, decisions, product
+├── tasks/                               # current work + backlog
+├── scripts/                             # dev utilities
+├── AGENTS.md                            # this file (read at session start)
+├── CONVENTIONS.md                       # code style rules
+├── opencode.json                        # opencode project config
+└── Package.swift                        # SPM manifest
 ```
 
 ---
 
 ## Code Conventions
 
-- Always use type hints on function signatures
-- Prefer functions over classes unless persistent state is needed
-- Use `loguru` for logging — never `print()`
-- One responsibility per function — if it needs a comment explaining what it does, split it
-- Tests live in `tests/` mirroring `src/` structure (e.g. `src/services/user.py` → `tests/services/test_user.py`)
-- Write tests alongside new code, not after
-- Use `pydantic` for data validation and serialization
-- Environment variables via `python-dotenv` — never hardcode secrets
+- Single-file Swift CLI — keep it that way unless it grows significantly
+- `print()` is fine for CLI output (no logger library available/needed)
+- Prefer simple functions, no classes unless state requires it
+- **Three-tier CoreAudio volume fallback** — see `docs/ARCHITECTURE.md` for full details:
+  1. Per-channel scalar (element 1) — headphones, instant
+  2. Main element scalar — monophonic devices
+  3. Virtual master volume (`'vmvc'`) — MacBook speakers, slightly more latency under fast scroll
+  4. NSAppleScript fallback — in-process, no subprocess
+- **Brightness** via `DisplayServicesGetBrightness`/`SetBrightness` loaded with `dlopen` from dyld shared cache (Fn+⌥+scroll). No IOKit framework needed. On macOS 26+ (Tahoe) the framework binary is missing from disk but symbols are in the shared cache — `dlopen` succeeds, `dlsym(RTLD_DEFAULT)` would fail.
+- Separate scroll accumulators per mode (`scrollAccumVolume`, `scrollAccumBrightness`)
+- `let volDelta = deltaSteps * 15` — multiplier for osascript fallback (line 61)
+- Build with `swift build -c release`, binary at `.build/release/trackpad-volume`
+- Deploy as LaunchAgent: copy to ~/Applications/ + launchctl load
 
 ---
 
@@ -77,6 +73,10 @@ Testing:      pytest
 - **Do not use `time.sleep()`** in production code — use proper async patterns
 - **Do not commit secrets** — use `.env` and ensure `.gitignore` covers it
 
+**Doc references (read these before coding):**
+- **`docs/ARCHITECTURE.md`** — Three-tier volume fallback, event tap setup, device management. Read this first before touching volume control code.
+- **`docs/DECISIONS.md`** — Architectural decision log. Check before suggesting alternatives.
+
 **Operating guardrails (from hard-won failures — see BLUEPRINT.md):**
 - **Do not set a thinking model as the active model.** Thinking models leave `content` empty and put output in `reasoning_content`, which breaks parsing. The model must be non-thinking local OR frontier.
 - **Do not retry the same failing fix more than twice.** Two strikes → escalate to a frontier model, or halt and leave a note.
@@ -89,7 +89,12 @@ Testing:      pytest
 
 ## Current Focus
 
-See `tasks/CURRENT.md` for the active task spec (or just describe it in plain English to OpenCode).
+**Done.** Three-tier CoreAudio volume control (headphones + speakers) + DisplayServices brightness control via Fn+⌥. See `docs/ARCHITECTURE.md` for the full system design. Binary builds with `swift build -c release`.
+
+**Remaining notes:**
+- Virtual master volume path has slightly more latency on fast flicks vs. headphone scalar path — known, acceptable
+- Delta multiplier for osascript fallback is 15 (tuned for MacBook speakers)
+- Brightness silently no-ops if `dlopen` or `dlsym` fails (e.g., pre-Tahoe macOS without DisplayServices framework, or if the API changes in a future release)
 
 ---
 
@@ -110,4 +115,11 @@ See `tasks/CURRENT.md` for the active task spec (or just describe it in plain En
 
 | Date | Mistake | Guard Added |
 |------|---------|-------------|
-| [DATE] | [What went wrong] | [What rule prevents recurrence] |
+| 2026-06-02 | Original code had no proactive Accessibility permission check; user was guessing whether Input Monitoring vs. Accessibility was needed | `.cgSessionEventTap` requires **Accessibility** (AX API) permission, not Input Monitoring. Always call `AXIsProcessTrustedWithOptions` at startup and print clear status. Add `.linkedFramework("ApplicationServices")` to Package.swift for the symbol. |
+| 2026-06-04 | Used `Process()` for osascript fallback — user reported lag from fork/exec overhead | Replace with `NSAppleScript` (in-process AppleScript execution). Subprocess spawning adds 50-200ms latency. |
+| 2026-06-04 | Tried `kAudioHardwareServiceDeviceProperty_VirtualMasterVolume` symbol directly — not available in Swift scope | Define the FourCharCode manually: `private let kVirtualMasterVolume: AudioObjectPropertySelector = 0x766D7663` ('vmvc'). |
+| 2026-06-04 | Virtual master volume read/write works but has slightly more latency than per-channel scalar under fast scroll | This is expected — virtual master goes through system audio processing. Not a bug. Documented in ARCHITECTURE.md. |
+| 2026-06-04 | `AGENTS.md` had stale Current Focus still referencing the original `deltaSteps * 12 → 25` change | Keep `Current Focus` in sync with actual project state. Point to docs/ for detailed architecture. |
+| 2026-06-04 | Brightness was not implemented | Added IOKit-based brightness via `AppleLMUController`. Fn+⌥+scroll. Single IOKit path, no fallback. Separate scroll accumulators per mode. Added `IOKit` to Package.swift linker settings. |
+| 2026-06-04 | Used `.maskAlternate` for brightness modifier — must verify no macOS Fn+⌥+scroll conflicts | Option+scroll is used by some system shortcuts, but the Fn requirement disambiguates. Documented in Known Constraints. |
+| 2026-06-04 | Used `dlsym(RTLD_DEFAULT, ...)` for DisplayServices symbols — failed on macOS 26 (Tahoe) where framework binary is missing from disk, even though symbols are in dyld shared cache | Use `dlopen("...DisplayServices", RTLD_LAZY)` first, then `dlsym(handle, ...)`. `RTLD_DEFAULT` only searches already-loaded libraries. On Tahoe the framework must be loaded from shared cache. |
