@@ -143,11 +143,9 @@ private let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
         let deltaX = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis2)
         let absY = abs(deltaY)
         let absX = abs(deltaX)
-        guard absX > 0 || absY > 0 else {
-            return nil
-        }
 
-        if absX >= absY {
+        // Require 2x dominance — diagonal scrolls are ambiguous and do nothing
+        if absX > absY * 2 {
             scrollAccumBrightness += deltaX
             let steps = max(-5, min(5, Int(scrollAccumBrightness / pxPerStepBrightness)))
             if steps != 0 {
@@ -157,35 +155,8 @@ private let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
                 fflush(stdout)
                 scrollAccumBrightness -= Double(steps) * pxPerStepBrightness
             }
-        } else {
+        } else if absY > absX * 2 {
             scrollAccumVolume += deltaY
-            let steps = max(-1, min(1, Int(scrollAccumVolume / pxPerStepVolume)))
-            if steps != 0 {
-                changeVolume(deltaSteps: steps)
-                print("  Fn+scroll \(steps > 0 ? "up" : "down"): volume")
-                fflush(stdout)
-                scrollAccumVolume -= Double(steps) * pxPerStepVolume
-            }
-        }
-
-        let isBrightness = flags.contains(.maskAlternate)
-        let delta = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
-        guard abs(delta) > 0 else {
-            return nil
-        }
-
-        if isBrightness {
-            scrollAccumBrightness += delta
-            let steps = max(-5, min(5, Int(scrollAccumBrightness / pxPerStepBrightness)))
-            if steps != 0 {
-                changeBrightness(deltaSteps: steps)
-                let dir = steps > 0 ? "up" : "down"
-                print("  Fn+⌥+ scroll \(dir): brightness (\(abs(steps)) step\(abs(steps) == 1 ? "" : "s"))")
-                fflush(stdout)
-                scrollAccumBrightness -= Double(steps) * pxPerStepBrightness
-            }
-        } else {
-            scrollAccumVolume += delta
             let steps = max(-1, min(1, Int(scrollAccumVolume / pxPerStepVolume)))
             if steps != 0 {
                 changeVolume(deltaSteps: steps)
