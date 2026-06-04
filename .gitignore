@@ -27,3 +27,6 @@ DerivedData/
 # OS
 .DS_Store
 blueprint-dryrun*/
+
+# Built app bundle
+trackpad-volume.app/

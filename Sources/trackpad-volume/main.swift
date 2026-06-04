@@ -1,11 +1,16 @@
 import Cocoa
 import ApplicationServices
 import CoreAudio
+import ServiceManagement
 
 // MARK: - Configuration
 
 private let pxPerStepVolume: Double = 48.0
 private let pxPerStepBrightness: Double = 11.0
+private let volumeStepScale: Float32 = 0.2
+private let brightnessStepScale: Float32 = 0.02
+private let fallbackMultiplier: Int = 20
+private let debugPrints = false
 
 
 // MARK: - State
@@ -18,9 +23,20 @@ private let kVirtualMasterVolume: AudioObjectPropertySelector = 0x766D7663 // 'v
 
 // MARK: - Volume Control
 
+private func fallbackAppleScriptVolume(deltaSteps: Int) {
+    let volDelta = deltaSteps * fallbackMultiplier
+    DispatchQueue.global().async {
+        let script = "set volume output volume ((output volume of (get volume settings)) + \(volDelta))"
+        if let ascr = NSAppleScript(source: script) {
+            var error: NSDictionary?
+            ascr.executeAndReturnError(&error)
+        }
+    }
+}
+
 private func changeVolume(deltaSteps: Int) {
     guard deltaSteps != 0 else { return }
-    let delta = Float32(deltaSteps) * 0.2
+    let delta = Float32(deltaSteps) * volumeStepScale
     let deviceID = cachedDeviceID
     guard deviceID != 0 else { return }
 
@@ -50,14 +66,14 @@ private func changeVolume(deltaSteps: Int) {
         )
     }
     if status != noErr {
-        let volDelta = deltaSteps * 20
-        DispatchQueue.global().async {
-            let script = "set volume output volume ((output volume of (get volume settings)) + \(volDelta))"
-            if let ascr = NSAppleScript(source: script) {
-                var error: NSDictionary?
-                ascr.executeAndReturnError(&error)
-            }
-        }
+        fallbackAppleScriptVolume(deltaSteps: deltaSteps)
+        return
+    }
+
+    var isSettable = DarwinBoolean(false)
+    let settableStatus = AudioObjectIsPropertySettable(deviceID, &volumeAddr, &isSettable)
+    guard settableStatus == noErr, isSettable.boolValue else {
+        fallbackAppleScriptVolume(deltaSteps: deltaSteps)
         return
     }
 
@@ -99,14 +115,16 @@ private typealias DisplayServicesGetBrightness = @convention(c) (CGDirectDisplay
 private typealias DisplayServicesSetBrightness = @convention(c) (CGDirectDisplayID, Float) -> Int32
 
 private let displayServices: (get: DisplayServicesGetBrightness?, set: DisplayServicesSetBrightness?) = {
-    // dlopen from the dyld shared cache — the framework binary may not exist on disk
-    // on macOS 26+ (Tahoe) but the symbols are in the shared cache.
     guard let handle = dlopen(
         "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
         RTLD_LAZY
     ) else { return (nil, nil) }
-    let get = unsafeBitCast(dlsym(handle, "DisplayServicesGetBrightness"), to: DisplayServicesGetBrightness?.self)
-    let set = unsafeBitCast(dlsym(handle, "DisplayServicesSetBrightness"), to: DisplayServicesSetBrightness?.self)
+    guard let symGet = dlsym(handle, "DisplayServicesGetBrightness"),
+          let symSet = dlsym(handle, "DisplayServicesSetBrightness") else {
+        return (nil, nil)
+    }
+    let get = unsafeBitCast(symGet, to: DisplayServicesGetBrightness.self)
+    let set = unsafeBitCast(symSet, to: DisplayServicesSetBrightness.self)
     return (get, set)
 }()
 
@@ -117,7 +135,7 @@ private func changeBrightness(deltaSteps: Int) {
     var brightness: Float = 0
     guard get(CGMainDisplayID(), &brightness) == 0 else { return }
 
-    brightness = max(0, min(1, brightness + Float(deltaSteps) * 0.02))
+    brightness = max(0, min(1, brightness + Float(deltaSteps) * brightnessStepScale))
     _ = set(CGMainDisplayID(), brightness)
 }
 
@@ -149,9 +167,11 @@ private let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
             let steps = max(-5, min(5, Int(scrollAccumBrightness / pxPerStepBrightness)))
             if steps != 0 {
                 changeBrightness(deltaSteps: steps)
-                let dir = steps > 0 ? "right" : "left"
-                print("  Fn+horizontal \(dir): brightness (\(abs(steps)) step\(abs(steps) == 1 ? "" : "s"))")
-                fflush(stdout)
+                if debugPrints {
+                    let dir = steps > 0 ? "right" : "left"
+                    print("  Fn+horizontal \(dir): brightness (\(abs(steps)) step\(abs(steps) == 1 ? "" : "s"))")
+                    fflush(stdout)
+                }
                 scrollAccumBrightness -= Double(steps) * pxPerStepBrightness
             }
         } else if absY > absX {
@@ -159,8 +179,10 @@ private let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
             let steps = max(-1, min(1, Int(scrollAccumVolume / pxPerStepVolume)))
             if steps != 0 {
                 changeVolume(deltaSteps: steps)
-                print("  Fn+scroll \(steps > 0 ? "up" : "down"): volume")
-                fflush(stdout)
+                if debugPrints {
+                    print("  Fn+scroll \(steps > 0 ? "up" : "down"): volume")
+                    fflush(stdout)
+                }
                 scrollAccumVolume -= Double(steps) * pxPerStepVolume
             }
         }
@@ -179,21 +201,91 @@ private let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
     return Unmanaged.passUnretained(event)
 }
 
-// MARK: - Main
+// MARK: - Status Bar Icon
 
-func main() {
-    print("trackpad-volume — Fn+scroll volume & brightness")
-    print("")
+private func statusBarIcon() -> NSImage {
+    let size = NSSize(width: 18, height: 18)
+    let image = NSImage(size: size)
+    image.isTemplate = true
 
-    let trusted = checkAccessibility(prompt: false)
-    if !trusted {
-        print("⚠️  Accessibility NOT granted")
-        _ = checkAccessibility(prompt: true)
-        exit(1)
+    image.lockFocus()
+
+    let rect = NSRect(x: 1.5, y: 1.5, width: 15, height: 15)
+    let trackpad = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
+    trackpad.lineWidth = 1.5
+    NSColor.black.setStroke()
+    trackpad.stroke()
+
+    let chevron = NSBezierPath()
+    chevron.move(to: NSPoint(x: 5, y: 7))
+    chevron.line(to: NSPoint(x: 9, y: 11))
+    chevron.line(to: NSPoint(x: 13, y: 7))
+    chevron.lineWidth = 1.5
+    chevron.lineCapStyle = .round
+    chevron.lineJoinStyle = .round
+    NSColor.black.setStroke()
+    chevron.stroke()
+
+    image.unlockFocus()
+    return image
+}
+
+// MARK: - App Delegate
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem?
+    private var launchAtLoginItem: NSMenuItem?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        setupMenuBar()
+
+        if !checkAccessibility(prompt: false) {
+            _ = checkAccessibility(prompt: true)
+            NSApplication.shared.terminate(nil)
+            return
+        }
+
+        setupEventTap()
     }
-    print("✅ Accessibility permission: granted")
-    print("")
 
+    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+                sender.state = .off
+            } else {
+                try SMAppService.mainApp.register()
+                sender.state = .on
+            }
+        } catch {
+            if debugPrints { print("Launch at Login toggle failed: \(error)") }
+        }
+    }
+
+    private func setupMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem?.button?.image = statusBarIcon()
+
+        let menu = NSMenu()
+
+        launchAtLoginItem = NSMenuItem(title: "Launch at Login",
+                                       action: #selector(toggleLaunchAtLogin(_:)),
+                                       keyEquivalent: "")
+        launchAtLoginItem?.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(launchAtLoginItem!)
+
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Quit",
+                                action: #selector(NSApplication.terminate(_:)),
+                                keyEquivalent: "q"))
+
+        statusItem?.menu = menu
+    }
+}
+
+// MARK: - Event Tap Setup
+
+private func setupEventTap() {
     var initialSize = UInt32(MemoryLayout<AudioDeviceID>.size)
     var initialAddr = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultOutputDevice,
@@ -219,24 +311,14 @@ func main() {
         callback: eventCallback,
         userInfo: nil
     ) else {
-        print("error: cannot create event tap")
-        exit(1)
+        return
     }
     eventTap = tap
 
     let rls = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), rls, .commonModes)
-
-    print("listening...")
-    print("  Fn     + vertical two-finger scroll → volume")
-    print("  Fn     + horizontal two-finger swipe → brightness")
-    print("  (Fn+scroll is suppressed — page won't move)")
-    print("  Regular scroll without Fn → normal scrolling")
-    print("")
-    print("  press ^C to quit")
-    fflush(stdout)
-
-    CFRunLoopRun()
 }
 
-main()
+let delegate = AppDelegate()
+NSApplication.shared.delegate = delegate
+NSApplication.shared.run()

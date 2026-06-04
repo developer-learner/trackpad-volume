@@ -11,7 +11,7 @@ let package = Package(
             name: "trackpad-volume",
             linkerSettings: [
                 .linkedFramework("ApplicationServices"),
-
+                .linkedFramework("ServiceManagement"),
             ]
         )
     ]
