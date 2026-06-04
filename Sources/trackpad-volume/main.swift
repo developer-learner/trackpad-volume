@@ -144,8 +144,7 @@ private let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
         let absY = abs(deltaY)
         let absX = abs(deltaX)
 
-        // Require 2x dominance — diagonal scrolls are ambiguous and do nothing
-        if absX > absY * 2 {
+        if absX > absY {
             scrollAccumBrightness -= deltaX
             let steps = max(-5, min(5, Int(scrollAccumBrightness / pxPerStepBrightness)))
             if steps != 0 {
@@ -155,7 +154,7 @@ private let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
                 fflush(stdout)
                 scrollAccumBrightness -= Double(steps) * pxPerStepBrightness
             }
-        } else if absY > absX * 2 {
+        } else if absY > absX {
             scrollAccumVolume += deltaY
             let steps = max(-1, min(1, Int(scrollAccumVolume / pxPerStepVolume)))
             if steps != 0 {
