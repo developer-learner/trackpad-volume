@@ -98,6 +98,17 @@ trackpad-volume/
 
 ---
 
+## Verification Gates
+
+- Any commit touching `Sources/trackpad-volume/main.swift` requires
+  `docs/SMOKE-CHECK.md` to pass before push
+- The pre-commit hook (`scripts/install-hooks.sh`) reminds but does
+  not block — the agent is responsible for actually running each check
+- Agent self-report of "it works" is not sufficient; every checklist
+  item must be individually verified
+
+---
+
 ## Key Contacts / Roles
 
 | Role | Name |
