@@ -89,6 +89,11 @@ private func changeVolume(deltaSteps: Int) {
             UInt32(MemoryLayout<Float32>.size), &volume
         )
     }
+
+    let currentLevel = volume
+    DispatchQueue.main.async {
+        VolumeHUD.show(level: currentLevel)
+    }
 }
 
 
@@ -139,8 +144,122 @@ private func changeBrightness(deltaSteps: Int) {
     _ = set(CGMainDisplayID(), brightness)
 }
 
-// MARK: - Permission Check
 
+// MARK: - Volume HUD
+
+private class VolumeHUDView: NSView {
+    var level: Float = 0
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+
+        let w = bounds.width
+        let h = bounds.height
+        let corner: CGFloat = 12
+
+        ctx.saveGState()
+
+        let bgRect = bounds.insetBy(dx: 0, dy: 0)
+        let bgPath = NSBezierPath(roundedRect: bgRect, xRadius: corner, yRadius: corner)
+        NSColor.black.withAlphaComponent(0.55).setFill()
+        bgPath.fill()
+
+        NSColor.white.withAlphaComponent(0.15).setStroke()
+        bgPath.lineWidth = 1
+        bgPath.stroke()
+
+        let iconText = "🔊"
+        let iconAttr: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 20),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.9)
+        ]
+        let iconSize = (iconText as NSString).size(withAttributes: iconAttr)
+        let iconX: CGFloat = 20
+        let iconY = h - iconSize.height - 22
+        (iconText as NSString).draw(at: NSPoint(x: iconX, y: iconY), withAttributes: iconAttr)
+
+        let barH: CGFloat = 6
+        let barY: CGFloat = 16
+        let barInset: CGFloat = 20
+        let barW = w - barInset * 2
+
+        let barBgPath = NSBezierPath(roundedRect:
+            NSRect(x: barInset, y: barY, width: barW, height: barH),
+            xRadius: barH / 2, yRadius: barH / 2)
+        NSColor.white.withAlphaComponent(0.15).setFill()
+        barBgPath.fill()
+
+        let fillW = max(barH, barW * CGFloat(level))
+        if fillW > 0 {
+            let fillPath = NSBezierPath(roundedRect:
+                NSRect(x: barInset, y: barY, width: fillW, height: barH),
+                xRadius: barH / 2, yRadius: barH / 2)
+            NSColor.white.withAlphaComponent(0.9).setFill()
+            fillPath.fill()
+        }
+
+        ctx.restoreGState()
+    }
+}
+
+private struct VolumeHUD {
+    private static let window: NSWindow = {
+        let size = NSSize(width: 260, height: 72)
+        let rect = NSRect(origin: .zero, size: size)
+        let w = NSWindow(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false)
+        w.level = .floating
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.hasShadow = true
+        w.alphaValue = 0
+        w.ignoresMouseEvents = true
+        w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+
+        let v = VolumeHUDView(frame: rect)
+        v.wantsLayer = true
+        w.contentView = v
+
+        return w
+    }()
+
+    private static var hideTimer: DispatchWorkItem?
+
+    static func show(level: Float) {
+        dispatchPrecondition(condition: .onQueue(.main))
+
+        guard let v = window.contentView as? VolumeHUDView else { return }
+        v.level = level
+        v.needsDisplay = true
+
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main!
+        let screenFrame = screen.frame
+
+        let originX = (screenFrame.width - window.frame.width) / 2 + screenFrame.origin.x
+        let originY = screenFrame.origin.y + screenFrame.height - window.frame.height - 60
+
+        window.setFrameOrigin(NSPoint(x: originX, y: originY))
+
+        if window.alphaValue < 0.5 {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.15
+                window.animator().alphaValue = 1.0
+            }, completionHandler: {})
+        }
+
+        hideTimer?.cancel()
+        let work = DispatchWorkItem {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.3
+                window.animator().alphaValue = 0.0
+            }, completionHandler: {})
+        }
+        hideTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+    }
+}
+
+
+// MARK: - Permission Check
 private func checkAccessibility(prompt: Bool) -> Bool {
     let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
     let opts: CFDictionary = [key: prompt] as CFDictionary

@@ -199,6 +199,51 @@ return nil (event consumed)
 
 ---
 
+## Volume HUD
+
+A floating on-screen overlay shows the current volume level when changed via Fn+scroll.
+
+### Architecture
+
+The HUD is separate from the event-tap callback path. After `changeVolume` writes the new level via CoreAudio, it dispatches to the main queue:
+
+```
+changeVolume()
+  |
+  +--- CoreAudio write (same thread as event tap)
+  |
+  +--- DispatchQueue.main.async { VolumeHUD.show(level:) }
+         |
+         v
+       VolumeHUD updates NSWindow on main RunLoop
+```
+
+The event-tap callback returns before the HUD is shown -- the dispatch is asynchronous.
+
+### Window Specs
+
+| Property | Value |
+|----------|-------|
+| Size | 260 x 72 |
+| Style | Borderless, clear background |
+| Level | `.floating` |
+| Mouse events | Ignored (`ignoresMouseEvents = true`) |
+| Spaces | All spaces + stationary + ignores cycle |
+| Position | Top-center of cursor's screen, 60pt from top edge |
+
+### Display Behavior
+
+- Fade in: 0.15s
+- Display: 1.5s (reset on each level change)
+- Fade out: 0.3s
+- Debounced: rapid scrolls cancel the previous hide timer, updating the level in-place
+
+### Visual
+
+Semi-transparent black rounded rect with thin white border. Speaker icon in the upper-left, white horizontal progress bar at the bottom.
+
+---
+
 ## Known Constraints
 
 - **Single output device.** Only controls the system default output device. Does not target specific apps or audio sessions.
