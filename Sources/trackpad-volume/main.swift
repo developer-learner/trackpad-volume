@@ -240,8 +240,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBar()
 
         if !checkAccessibility(prompt: false) {
-            _ = checkAccessibility(prompt: true)
-            NSApplication.shared.terminate(nil)
             return
         }
 

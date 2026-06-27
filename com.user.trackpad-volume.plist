@@ -6,11 +6,11 @@
     <string>com.user.trackpad-volume</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/YOU/Applications/trackpad-volume.app/Contents/MacOS/trackpad-volume</string>
+        <string>/Users/arc.elixir/Applications/trackpad-volume.app/Contents/MacOS/trackpad-volume</string>
     </array>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
     <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
     <string>/tmp/trackpad-volume.log</string>
