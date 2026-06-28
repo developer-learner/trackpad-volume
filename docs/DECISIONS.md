@@ -50,6 +50,16 @@ user-facing feedback must use non-blocking dispatch only.
 
 **Do not suggest:** Changing to SwiftUI (requires new dependency chain), adding a library (SFSymbols, etc.), moving HUD to a background thread (NSView must be on main), or showing the HUD from within the event-tap callback.
 
+## 2026-06-27 — Persistent self-signed code signing identity
+
+**Decision:** Sign the app bundle with a persistent self-signed identity (`TrackpadVolume Dev`) instead of ad-hoc signing.
+
+**Alternatives considered:** Ad-hoc signing (current), Apple Developer Program signing.
+
+**Reason:** TCC keys Accessibility permission grants to the code signing cdhash. Ad-hoc signing generates a new cdhash on every build, invalidating the grant. A persistent self-signed identity preserves the cdhash across rebuilds.
+
+**Do not suggest:** Falling back to ad-hoc if the identity is missing, or adding Apple Developer Program enrollment. Hard-fail with setup instructions.
+
 ---
 
 > Add new decisions above this line, newest first.

@@ -7,18 +7,30 @@ DEST_DIR="$HOME/Applications"
 BUNDLE_DIR="$DEST_DIR/$APP_NAME.app"
 LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
 
+SIGN_IDENTITY="TrackpadVolume Dev"
+
+echo "==> Checking code signing identity..."
+touch /tmp/.signtest
+if ! codesign -fs "$SIGN_IDENTITY" --timestamp=none /tmp/.signtest 2>/dev/null; then
+    rm -f /tmp/.signtest
+    echo "ERROR: Cannot sign with '$SIGN_IDENTITY'."
+    echo "Create it in Keychain Access → Certificate Assistant → Create a Certificate"
+    echo "  Name: $SIGN_IDENTITY | Type: Self Signed Root | Cert Type: Code Signing"
+    exit 1
+fi
+rm -f /tmp/.signtest
+
 echo "==> Building release binary..."
 swift build -c release --package-path "$SRC_DIR"
-
-echo "==> Signing with stable identity..."
-codesign --sign "trackpad-volume Developer" --keychain ~/Library/Keychains/login.keychain-db \
-  "$SRC_DIR/.build/release/$APP_NAME" 2>&1
 
 echo "==> Copying to $BUNDLE_DIR..."
 rm -rf "$BUNDLE_DIR"
 mkdir -p "$BUNDLE_DIR/Contents/MacOS"
 cp "$SRC_DIR/.build/release/$APP_NAME" "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 cp "$SRC_DIR/Info.plist" "$BUNDLE_DIR/Contents/Info.plist"
+
+echo "==> Signing app bundle..."
+codesign -fs "$SIGN_IDENTITY" "$BUNDLE_DIR"
 
 echo "==> Installing LaunchAgent..."
 mkdir -p "$LAUNCH_AGENT_DIR"

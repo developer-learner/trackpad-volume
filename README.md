@@ -13,6 +13,16 @@ Fn+vertical scroll → volume. Fn+horizontal swipe → brightness.
 
 ## For developers (build from source)
 
+### One-time setup: code signing identity
+
+Before first `scripts/deploy.sh`, create a self-signed code signing certificate:
+
+1. Open **Keychain Access → Certificate Assistant → Create a Certificate**
+2. Set **Name:** `TrackpadVolume Dev`, **Identity Type:** `Self Signed Root`, **Certificate Type:** `Code Signing`
+3. Click **Create**
+
+This preserves your Accessibility permission grant across rebuilds.
+
 ```bash
 git clone https://github.com/developer-learner/trackpad-volume.git
 cd trackpad-volume
